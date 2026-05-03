@@ -423,16 +423,19 @@ html, body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 18px;
-    padding: 32px 24px;
+    justify-content: flex-start;
+    gap: 14px;
+    padding: 28px 20px calc(env(safe-area-inset-bottom, 0px) + 28px) 20px;
     text-align: center;
     color: #fff;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .bt-block-icon {
-    font-size: 80px;
+    font-size: 64px;
     animation: bt-pulse 2s ease-in-out infinite;
+    flex-shrink: 0;
 }
 
 @keyframes bt-pulse {
@@ -441,47 +444,76 @@ html, body {
 }
 
 .bt-block h2 {
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 700;
-    margin-top: 8px;
+    margin-top: 4px;
+    flex-shrink: 0;
 }
 
 .bt-block p {
-    font-size: 15px;
+    font-size: 14px;
+    line-height: 1.45;
+    max-width: 360px;
+    color: rgba(255, 255, 255, 0.88);
+    white-space: pre-wrap;
+    word-break: break-word;
+    width: 100%;
+}
+
+#bt-block-text {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 12px 14px;
+    border-radius: 10px;
+    text-align: left;
+    font-size: 13px;
     line-height: 1.5;
-    max-width: 340px;
-    color: rgba(255, 255, 255, 0.85);
+    max-height: 38vh;
+    overflow-y: auto;
 }
 
 .bt-block-hint {
     color: rgba(255, 255, 255, 0.55) !important;
-    font-size: 13px !important;
+    font-size: 12px !important;
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
 }
 
 .bt-block button {
-    padding: 14px 28px;
+    padding: 16px 22px;
     border-radius: 14px;
     border: none;
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 700;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
-    margin-top: 8px;
+    margin-top: 4px;
+    width: 100%;
+    max-width: 360px;
+    line-height: 1.2;
+    flex-shrink: 0;
 }
 
 #bt-block-recheck {
-    background: #fff;
-    color: #0f172a;
-    min-width: 200px;
+    background: linear-gradient(180deg, #22c55e, #16a34a);
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(34, 197, 94, 0.35);
+}
+
+#bt-block-recheck:active {
+    transform: scale(0.98);
+    background: linear-gradient(180deg, #16a34a, #15803d);
 }
 
 .bt-block-bypass {
-    background: transparent;
-    color: rgba(255, 255, 255, 0.6);
+    background: transparent !important;
+    color: rgba(255, 255, 255, 0.55) !important;
     text-decoration: underline;
     font-weight: 500 !important;
     font-size: 13px !important;
-    margin-top: 0 !important;
+    box-shadow: none !important;
+    padding: 8px !important;
 }
 
 /* === Estado escaneando (pulso visual) === */

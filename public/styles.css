@@ -414,6 +414,76 @@ html, body {
     line-height: 1.4;
 }
 
+/* === Overlay "conecta Bluetooth" === */
+.bt-block {
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(160deg, #1e293b, #0f172a);
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 32px 24px;
+    text-align: center;
+    color: #fff;
+}
+
+.bt-block-icon {
+    font-size: 80px;
+    animation: bt-pulse 2s ease-in-out infinite;
+}
+
+@keyframes bt-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50%      { transform: scale(1.08); opacity: 0.85; }
+}
+
+.bt-block h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-top: 8px;
+}
+
+.bt-block p {
+    font-size: 15px;
+    line-height: 1.5;
+    max-width: 340px;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.bt-block-hint {
+    color: rgba(255, 255, 255, 0.55) !important;
+    font-size: 13px !important;
+}
+
+.bt-block button {
+    padding: 14px 28px;
+    border-radius: 14px;
+    border: none;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    margin-top: 8px;
+}
+
+#bt-block-recheck {
+    background: #fff;
+    color: #0f172a;
+    min-width: 200px;
+}
+
+.bt-block-bypass {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    text-decoration: underline;
+    font-weight: 500 !important;
+    font-size: 13px !important;
+    margin-top: 0 !important;
+}
+
 /* === Estado escaneando (pulso visual) === */
 .camera-view.scanning .frame-guide {
     animation: pulse 1.2s ease-in-out infinite;

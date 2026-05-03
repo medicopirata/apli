@@ -30,14 +30,23 @@ const $debugCapture = document.getElementById("debug-capture");
 const $debugRaw     = document.getElementById("debug-raw");
 const $debugQs      = document.getElementById("debug-questions");
 const $autoToggle   = document.getElementById("auto-toggle");
+const $btBlock      = document.getElementById("bt-block");
+const $btRecheck    = document.getElementById("bt-block-recheck");
+const $btBypass     = document.getElementById("bt-block-bypass");
+const $btText       = document.getElementById("bt-block-text");
 
 // === Servicios y estado ===
 const camera = new Camera($video, $canvas);
 const speech = new Speech();
 let busy = false;
 let speechChain = Promise.resolve();
+let _audioBlocked = false;
 const enqueueSpeech = (text) => {
-    speechChain = speechChain.then(() => speech.speak(text));
+    if (_audioBlocked) return Promise.resolve();
+    speechChain = speechChain.then(() => {
+        if (_audioBlocked) return;
+        return speech.speak(text);
+    });
     return speechChain;
 };
 
@@ -182,6 +191,97 @@ function refreshCameraDebug() {
     $debugCamera.textContent = lines.join("\n");
 }
 
+// === Detección de auriculares Bluetooth ===
+// Si no hay un dispositivo de salida de audio que parezca Bluetooth,
+// bloqueamos la app con un overlay para que las respuestas no salgan
+// por el altavoz del teléfono.
+
+const BT_LABEL_RE = /\b(bluetooth|bt[-_ ]|wireless|airpods|buds|headset|headphone|aud[ií]fono|auricular|beats|bose|sony|jbl|sennheiser|skullcandy|galaxy buds|pixel buds)\b/i;
+
+let _btBypass = false;
+let _btCheckPending = false;
+
+async function isBluetoothAudioPresent() {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+        // Sin API → no podemos comprobar; mejor permitir.
+        return { ok: true, reason: "API no disponible" };
+    }
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const outputs = devices.filter(d => d.kind === "audiooutput");
+
+        // Si los labels están vacíos (sin permiso aún) no podemos juzgar.
+        const haveLabels = outputs.some(d => d.label && d.label.length > 0);
+        if (!haveLabels) {
+            return { ok: true, reason: "Etiquetas no disponibles aún" };
+        }
+
+        const matches = outputs.filter(d => BT_LABEL_RE.test(d.label));
+        if (matches.length > 0) {
+            return { ok: true, label: matches[0].label };
+        }
+        return {
+            ok: false,
+            reason: "Ningún dispositivo Bluetooth detectado",
+            found: outputs.map(d => d.label).filter(Boolean)
+        };
+    } catch (err) {
+        console.warn("enumerateDevices falló:", err);
+        return { ok: true, reason: "Error en enumeración" };
+    }
+}
+
+function showBtBlock(extra = "") {
+    $btText.textContent = "La app solo funciona con auriculares Bluetooth conectados, para que las respuestas no se oigan por el altavoz del teléfono."
+        + (extra ? `\n\nDispositivos detectados: ${extra}` : "");
+    $btBlock.hidden = false;
+    // Pausa todo lo activo
+    _audioBlocked = true;
+    speech.cancel();
+    speechChain = Promise.resolve();
+    stopAutoDetect();
+    setStatus("Pausado — sin auriculares Bluetooth");
+}
+
+function hideBtBlock() {
+    _audioBlocked = false;
+    $btBlock.hidden = true;
+}
+
+async function enforceBluetoothCheck({ initialStart = false } = {}) {
+    if (_btBypass) return true;
+    if (_btCheckPending) return null;
+    _btCheckPending = true;
+    try {
+        const res = await isBluetoothAudioPresent();
+        if (res.ok) {
+            hideBtBlock();
+            if (initialStart) await startAfterBtOk();
+            return true;
+        }
+        showBtBlock(res.found?.join(", ") || "");
+        return false;
+    } finally {
+        _btCheckPending = false;
+    }
+}
+
+async function startAfterBtOk() {
+    if (!camera.stream) {
+        try { await camera.start(); } catch (e) { console.error(e); return; }
+    }
+    if (autoMode) startAutoDetect();
+    requestWakeLock();
+    setStatus("Buscando página…");
+}
+
+// Reacciona a cambios de dispositivos (BT conectado/desconectado, etc.)
+if (navigator.mediaDevices?.addEventListener) {
+    navigator.mediaDevices.addEventListener("devicechange", () => {
+        enforceBluetoothCheck({ initialStart: true });
+    });
+}
+
 // === Wake Lock: evita que la pantalla se apague mientras la app está abierta ===
 let _wakeLock = null;
 async function requestWakeLock() {
@@ -212,9 +312,14 @@ async function init() {
     try {
         setStatus("Solicitando acceso a la cámara…");
         await camera.start();
-        setStatus("Buscando página…");
         refreshCameraDebug();
         setInterval(refreshCameraDebug, 1000);
+
+        // Tras conceder cámara, podemos enumerar audiooutputs con etiquetas.
+        const ok = await enforceBluetoothCheck();
+        if (!ok) return;  // overlay mostrado, esperando BT
+
+        setStatus("Buscando página…");
         startAutoDetect();
         requestWakeLock();
     } catch (err) {
@@ -416,6 +521,15 @@ $debugToggle.addEventListener("click", () => {
     $debugPanel.hidden = false;
 });
 $debugClose.addEventListener("click", () => { $debugPanel.hidden = true; });
+
+$btRecheck.addEventListener("click", () => {
+    enforceBluetoothCheck({ initialStart: true });
+});
+$btBypass.addEventListener("click", () => {
+    _btBypass = true;
+    hideBtBlock();
+    startAfterBtOk();
+});
 
 window.addEventListener("pagehide", () => {
     stopAutoDetect();

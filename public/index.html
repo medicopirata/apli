@@ -99,6 +99,16 @@
             <p id="error-text"></p>
             <button id="error-close" type="button">Cerrar</button>
         </div>
+
+        <!-- Overlay de "conecta Bluetooth" -->
+        <div id="bt-block" class="bt-block" hidden>
+            <div class="bt-block-icon" aria-hidden="true">🎧</div>
+            <h2>Conecta auriculares Bluetooth</h2>
+            <p id="bt-block-text">La app solo funciona con auriculares Bluetooth conectados, para que las respuestas no se oigan por el altavoz del teléfono.</p>
+            <p class="bt-block-hint">Empareja tus auriculares y vuelve a esta pantalla. Se desbloqueará automáticamente.</p>
+            <button id="bt-block-recheck" type="button">Volver a comprobar</button>
+            <button id="bt-block-bypass" type="button" class="bt-block-bypass">Continuar de todos modos</button>
+        </div>
     </main>
 
     <!--

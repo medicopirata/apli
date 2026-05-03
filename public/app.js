@@ -56,6 +56,7 @@ const STABILITY_DIFF_MAX   = 7;       // diff medio por píxel para "estable"
 const STABLE_FRAMES_NEEDED = 4;       // ~1.6s de quietud → captura
 const MIN_VARIANCE         = 150;     // mínima riqueza visual (no pared blanca/negra)
 const MOVEMENT_DIFF_MIN    = 18;      // diff que cuenta como "movimiento real"
+const MIN_SHARPNESS        = 350;     // varianza Laplaciana mínima → captura nítida
 const COOLDOWN_MS          = 8000;    // pausa tras dictar (pase de página)
 
 let autoMode       = true;
@@ -129,6 +130,14 @@ function autoDetectTick() {
             setStatus(`Detectando página… ${pct}%`);
             $cameraView.classList.add("scanning");
             if (stableCount >= STABLE_FRAMES_NEEDED) {
+                // Comprobación final de nitidez antes de gastar API call.
+                const sharp = camera.getSharpness();
+                if (sharp < MIN_SHARPNESS) {
+                    stableCount = Math.max(1, STABLE_FRAMES_NEEDED - 1);
+                    setStatus(`Imagen borrosa (${Math.round(sharp)}) — sujeta más fija…`);
+                    prevSig = sig;
+                    return;
+                }
                 stableCount = 0;
                 $cameraView.classList.remove("scanning");
                 triggerAutoScan();
@@ -147,7 +156,7 @@ function autoDetectTick() {
 
 async function triggerAutoScan() {
     try {
-        const { base64, dataUrl } = camera.capture(1600, 0.85);
+        const { base64, dataUrl } = camera.capture(2200, 0.9);
         await processBase64(base64, dataUrl, /*fromAuto=*/true);
     } catch (err) {
         console.error(err);
@@ -177,6 +186,7 @@ function refreshCameraDebug() {
     }
     const track = camera.stream.getVideoTracks()[0];
     const settings = track?.getSettings?.() || {};
+    const sharp = camera.getSharpness();
     const lines = [
         `Estado: activa`,
         `Track label: ${track?.label || "(desconocido)"}`,
@@ -184,6 +194,7 @@ function refreshCameraDebug() {
         `Modo: ${settings.facingMode || "(desconocido)"}`,
         `FPS: ${settings.frameRate || "?"}`,
         `Video size: ${$video.videoWidth} × ${$video.videoHeight}`,
+        `Nitidez (Laplacian var): ${Math.round(sharp)}  (umbral ${MIN_SHARPNESS})`,
         `Auto-detect: ${autoMode ? "ON" : "OFF"}`,
         `Stable count: ${stableCount}/${STABLE_FRAMES_NEEDED}`,
         `Cooldown: ${Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000))}s`
@@ -501,7 +512,7 @@ async function handleScan() {
     if (busy) return;
     try {
         setStatus("Capturando…");
-        const { base64, dataUrl } = camera.capture(1600, 0.85);
+        const { base64, dataUrl } = camera.capture(2200, 0.9);
         await processBase64(base64, dataUrl, /*fromAuto=*/false);
     } catch (err) {
         console.error(err);
@@ -517,7 +528,7 @@ async function handleFileUpload(ev) {
     try {
         setStatus("Procesando imagen subida…");
         const dataUrl = await readFileAsDataUrl(file);
-        const resized = await resizeDataUrl(dataUrl, 1600, 0.85);
+        const resized = await resizeDataUrl(dataUrl, 2200, 0.9);
         const base64 = resized.dataUrl.split(",")[1];
         await processBase64(base64, resized.dataUrl, /*fromAuto=*/false);
     } catch (err) {

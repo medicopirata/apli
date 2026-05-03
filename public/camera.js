@@ -95,6 +95,51 @@ export class Camera {
     }
 
     /**
+     * Estima la nitidez del fotograma actual usando la varianza del Laplaciano
+     * sobre una versión 192×144 en escala de grises. Valores típicos:
+     *  - texto enfocado: ≥ 800
+     *  - texto algo movido: 200–700
+     *  - imagen muy borrosa: < 150
+     * @returns {number} índice de nitidez (más alto = más nítido)
+     */
+    getSharpness() {
+        const W = 192, H = 144;
+        if (!this.video.videoWidth || !this.video.videoHeight) return 0;
+
+        if (!this._shCanvas) {
+            this._shCanvas = document.createElement("canvas");
+            this._shCanvas.width = W;
+            this._shCanvas.height = H;
+            this._shCtx = this._shCanvas.getContext("2d", { willReadFrequently: true });
+        }
+        try {
+            this._shCtx.drawImage(this.video, 0, 0, W, H);
+        } catch {
+            return 0;
+        }
+
+        const px = this._shCtx.getImageData(0, 0, W, H).data;
+        const gray = new Int16Array(W * H);
+        for (let i = 0, j = 0; i < px.length; i += 4, j++) {
+            gray[j] = (px[i] * 77 + px[i + 1] * 150 + px[i + 2] * 29) >> 8;
+        }
+
+        // Laplaciano 3×3:  0 -1  0 / -1 4 -1 / 0 -1 0
+        let sum = 0, sum2 = 0, n = 0;
+        for (let y = 1; y < H - 1; y++) {
+            for (let x = 1; x < W - 1; x++) {
+                const i = y * W + x;
+                const v = 4 * gray[i] - gray[i - 1] - gray[i + 1] - gray[i - W] - gray[i + W];
+                sum += v;
+                sum2 += v * v;
+                n++;
+            }
+        }
+        const mean = sum / n;
+        return sum2 / n - mean * mean;  // varianza
+    }
+
+    /**
      * Captura el fotograma actual y lo devuelve como base64 (sin el prefijo data:).
      * @param {number} maxWidth Ancho máximo (manteniendo aspecto). Por defecto 1600.
      * @param {number} quality JPEG quality 0-1. Por defecto 0.85.

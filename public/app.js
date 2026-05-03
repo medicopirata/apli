@@ -182,6 +182,31 @@ function refreshCameraDebug() {
     $debugCamera.textContent = lines.join("\n");
 }
 
+// === Wake Lock: evita que la pantalla se apague mientras la app está abierta ===
+let _wakeLock = null;
+async function requestWakeLock() {
+    if (!("wakeLock" in navigator)) {
+        console.info("Wake Lock no soportado en este navegador");
+        return;
+    }
+    try {
+        _wakeLock = await navigator.wakeLock.request("screen");
+        _wakeLock.addEventListener("release", () => {
+            _wakeLock = null;
+        });
+        console.info("Wake lock activo: pantalla no se apagará");
+    } catch (err) {
+        console.warn("No se pudo activar wake lock:", err.message);
+    }
+}
+
+// Re-pide el lock al volver al foreground (Android lo libera al ocultar pestaña).
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && !_wakeLock) {
+        requestWakeLock();
+    }
+});
+
 // === Inicialización ===
 async function init() {
     try {
@@ -191,6 +216,7 @@ async function init() {
         refreshCameraDebug();
         setInterval(refreshCameraDebug, 1000);
         startAutoDetect();
+        requestWakeLock();
     } catch (err) {
         console.error("Error iniciando cámara:", err);
         $debugCamera.textContent = `ERROR: ${err.message}\n\nPuedes usar "Subir imagen" como alternativa.`;

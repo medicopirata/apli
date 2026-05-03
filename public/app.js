@@ -397,14 +397,47 @@ window.addEventListener("pagehide", () => {
     speech.cancel();
 });
 
-// Desbloqueo de TTS en móviles tras primer gesto
+// Desbloqueo de TTS + sesión de audio "media" tras primer gesto del usuario.
+// El segundo paso (AudioContext con un buffer silencioso en bucle) fuerza
+// a Android Chrome a clasificar la salida como STREAM_MUSIC, lo que hace
+// que la voz se enrute a auriculares Bluetooth/cable y no al altavoz.
+let _audioCtx = null;
 document.addEventListener("click", function unlockSpeech() {
     try {
         const u = new SpeechSynthesisUtterance("");
         u.volume = 0;
         window.speechSynthesis.speak(u);
     } catch (_) { /* noop */ }
+
+    try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx && !_audioCtx) {
+            _audioCtx = new Ctx();
+            // Buffer de 1 s totalmente silencioso, en loop infinito.
+            const buf = _audioCtx.createBuffer(1, _audioCtx.sampleRate, _audioCtx.sampleRate);
+            const src = _audioCtx.createBufferSource();
+            src.buffer = buf;
+            src.loop = true;
+            // Pasamos por un gain a 0.0001 — algunos navegadores no consideran
+            // "playing" un nodo cuyo destino lleva 0 absoluto.
+            const gain = _audioCtx.createGain();
+            gain.gain.value = 0.0001;
+            src.connect(gain).connect(_audioCtx.destination);
+            src.start();
+            // Si el contexto entra en estado "suspended", lo reanudamos.
+            if (_audioCtx.state === "suspended") _audioCtx.resume().catch(() => {});
+        }
+    } catch (_) { /* noop */ }
+
     document.removeEventListener("click", unlockSpeech);
 }, { once: true });
+
+// Si el navegador suspende el AudioContext (p.ej. al volver de background),
+// lo reanudamos en cualquier interacción posterior.
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && _audioCtx?.state === "suspended") {
+        _audioCtx.resume().catch(() => {});
+    }
+});
 
 init();

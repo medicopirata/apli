@@ -203,30 +203,32 @@ function refreshCameraDebug() {
 }
 
 // === Detección de auriculares Bluetooth ===
-// Android Chrome no expone audiooutputs de forma fiable: a veces la lista
-// está vacía o sin etiquetas. Por eso usamos un enfoque mixto:
-//
-//   1) Pantalla inicial OBLIGATORIA donde el usuario confirma manualmente
-//      "tengo los auriculares conectados".
-//   2) En ese momento congelamos un snapshot de audiooutputs (count + IDs).
-//   3) Cada 2 s comparamos: si el número de outputs baja respecto al snapshot,
-//      o si alguno de los IDs originales desaparece, asumimos desconexión y
-//      bloqueamos. Esto NO depende de etiquetas.
-//   4) Al reconectar/recuperar el snapshot original (o iguales/más dispositivos),
-//      el usuario puede volver a confirmar.
+// En Android Chrome la lista de audiooutputs no es fiable, pero
+// la entrada de audio (mic) SÍ se actualiza al instante: cuando hay BT
+// conectado, el mic por defecto es el del auricular; al desconectar,
+// vuelve al mic interno del teléfono. Monitorizamos el `label` (y deviceId)
+// del audioinput por defecto cada 2 s — si cambia respecto al snapshot
+// inicial, asumimos que el dispositivo de audio cambió y bloqueamos.
 
-let _audioRefSnapshot = null;   // { count, ids } al confirmar el usuario
+let _audioRefSnapshot = null;   // { micLabel, micDeviceId, outputs } al confirmar
 let _btPollInterval = null;
-let _micWarmupTried = false;
 
-async function warmUpAudioLabels() {
-    if (_micWarmupTried) return;
-    _micWarmupTried = true;
+async function probeDefaultMic() {
+    // Pide un stream de audio breve para leer el label/deviceId del mic
+    // por defecto en este momento exacto. Se cierra inmediatamente.
+    let stream = null;
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach(t => t.stop());
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const track = stream.getAudioTracks()[0];
+        const settings = track.getSettings ? track.getSettings() : {};
+        return {
+            label:    track.label || "",
+            deviceId: settings.deviceId || ""
+        };
     } catch (e) {
-        console.warn("Warmup de audio falló:", e.message);
+        return { label: "", deviceId: "", error: e.message };
+    } finally {
+        if (stream) stream.getTracks().forEach(t => t.stop());
     }
 }
 
@@ -240,22 +242,24 @@ async function listAudioOutputs() {
     }
 }
 
-function renderBtOverlay(outputs, mode = "initial") {
-    const list = outputs.length
+function renderBtOverlay(outputs, mic, mode = "initial") {
+    const outList = outputs.length
         ? outputs.map(d => `• ${d.label || "(sin etiqueta)"}`).join("\n")
-        : "(el navegador no expuso audiooutputs)";
+        : "(no expuestos por el navegador)";
     const intro = mode === "initial"
-        ? "Conecta los auriculares Bluetooth y pulsa el botón cuando estén listos. La app pausará sola si los desconectas."
-        : "Se ha desconectado un dispositivo de audio. Vuelve a conectar los auriculares Bluetooth y pulsa Volver a comprobar.";
-    $btText.textContent = `${intro}\n\nSalidas detectadas ahora:\n${list}`;
-    // Cambia el texto del botón según el contexto
+        ? "Conecta los auriculares Bluetooth y pulsa el botón cuando estén listos.\nLa app pausará sola si los desconectas."
+        : "Se ha desconectado el dispositivo de audio. Vuelve a conectar los auriculares y pulsa Volver a comprobar.";
+    $btText.textContent =
+        `${intro}\n\n` +
+        `Micrófono activo: ${mic?.label || "(sin etiqueta)"}\n` +
+        `Salidas: \n${outList}`;
     $btRecheck.textContent = mode === "initial"
         ? "Tengo auriculares conectados — empezar"
         : "Volver a comprobar";
 }
 
-function showBtBlock(outputs, mode) {
-    renderBtOverlay(outputs, mode);
+function showBtBlock(outputs, mic, mode) {
+    renderBtOverlay(outputs, mic, mode);
     $btBlock.hidden = false;
     _audioBlocked = true;
     speech.cancel();
@@ -270,41 +274,53 @@ function hideBtBlock() {
 }
 
 async function snapshotAudio() {
+    const mic = await probeDefaultMic();
     const outputs = await listAudioOutputs();
     _audioRefSnapshot = {
-        count: outputs.length,
-        ids: outputs.map(d => d.deviceId),
-        labels: outputs.map(d => d.label)
+        micLabel:    mic.label,
+        micDeviceId: mic.deviceId,
+        outCount:    outputs.length,
+        outIds:      outputs.map(d => d.deviceId)
     };
     console.info("Snapshot audio:", _audioRefSnapshot);
 }
 
-async function checkAudioStillConnected() {
+async function audioStillOk() {
     if (!_audioRefSnapshot) return true;
-    const outputs = await listAudioOutputs();
-    const currentIds = new Set(outputs.map(d => d.deviceId));
 
-    // Cualquiera de los IDs originales que falte → desconexión.
-    const missing = _audioRefSnapshot.ids.filter(id => !currentIds.has(id));
-    if (missing.length > 0) {
-        console.warn("Dispositivos perdidos:", missing);
+    // Comprobación principal: el mic por defecto sigue siendo el mismo.
+    const mic = await probeDefaultMic();
+    if (_audioRefSnapshot.micDeviceId &&
+        mic.deviceId &&
+        mic.deviceId !== _audioRefSnapshot.micDeviceId) {
+        console.warn("Mic deviceId cambió:", _audioRefSnapshot.micDeviceId, "→", mic.deviceId);
         return false;
     }
-    // Alternativa: el conteo bajó (algunos navegadores reciclan IDs).
-    if (outputs.length < _audioRefSnapshot.count) {
-        console.warn("Conteo de outputs bajó:", outputs.length, "<", _audioRefSnapshot.count);
+    if (_audioRefSnapshot.micLabel &&
+        mic.label &&
+        mic.label !== _audioRefSnapshot.micLabel) {
+        console.warn("Mic label cambió:", _audioRefSnapshot.micLabel, "→", mic.label);
         return false;
     }
+
+    // Comprobación secundaria: la lista de outputs no se ha encogido.
+    const outputs = await listAudioOutputs();
+    if (outputs.length < _audioRefSnapshot.outCount) {
+        console.warn("Outputs bajó:", outputs.length, "<", _audioRefSnapshot.outCount);
+        return false;
+    }
+
     return true;
 }
 
 async function audioWatchdog() {
-    if (_audioBlocked) return;          // ya bloqueado
-    if (!_audioRefSnapshot) return;     // aún no confirmado
-    const ok = await checkAudioStillConnected();
+    if (_audioBlocked) return;
+    if (!_audioRefSnapshot) return;
+    const ok = await audioStillOk();
     if (!ok) {
+        const mic     = await probeDefaultMic();
         const outputs = await listAudioOutputs();
-        showBtBlock(outputs, "disconnect");
+        showBtBlock(outputs, mic, "disconnect");
         _audioRefSnapshot = null;
     }
 }
@@ -360,13 +376,11 @@ async function init() {
         refreshCameraDebug();
         setInterval(refreshCameraDebug, 1000);
 
-        // Warmup de mic para que se vean labels/IDs de audiooutput
-        await warmUpAudioLabels();
-
-        // SIEMPRE se muestra la pantalla inicial: el usuario confirma
-        // manualmente que tiene auriculares conectados antes de empezar.
+        // Pantalla inicial OBLIGATORIA: el usuario confirma manualmente
+        // que tiene auriculares conectados antes de empezar a usar la voz.
+        const mic     = await probeDefaultMic();
         const outputs = await listAudioOutputs();
-        showBtBlock(outputs, "initial");
+        showBtBlock(outputs, mic, "initial");
         startBtPolling();
     } catch (err) {
         console.error("Error iniciando cámara:", err);

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0a0a0a">
+    <title>Escáner de Tests por Voz</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <main id="app">
+        <!-- Vista de cámara -->
+        <section class="camera-view">
+            <video id="video" autoplay playsinline muted></video>
+            <canvas id="canvas" hidden></canvas>
+
+            <!-- Marco guía -->
+            <div class="frame-guide" aria-hidden="true">
+                <span class="corner tl"></span>
+                <span class="corner tr"></span>
+                <span class="corner bl"></span>
+                <span class="corner br"></span>
+            </div>
+
+            <!-- Estado superior -->
+            <header class="status-bar" role="status" aria-live="polite">
+                <span id="status-text">Apunta a la página y pulsa Escanear</span>
+            </header>
+
+            <!-- Vista previa de la última captura (esquina) -->
+            <aside id="preview" class="preview" hidden>
+                <img id="preview-img" alt="Última captura">
+            </aside>
+
+            <!-- Controles inferiores -->
+            <footer class="controls">
+                <label class="auto-toggle">
+                    <input type="checkbox" id="auto-toggle" checked>
+                    <span class="auto-toggle-track" aria-hidden="true">
+                        <span class="auto-toggle-thumb"></span>
+                    </span>
+                    <span class="auto-toggle-label">Detección automática</span>
+                </label>
+
+                <button id="scan-btn" class="scan-btn" type="button">
+                    <span class="scan-btn-icon" aria-hidden="true">📷</span>
+                    <span class="scan-btn-text">Escanear ahora</span>
+                </button>
+
+                <label for="file-input" class="upload-btn">
+                    <span>📁 O subir imagen del dispositivo</span>
+                </label>
+                <input id="file-input" type="file" accept="image/*" hidden>
+
+                <button id="stop-btn" class="stop-btn" type="button" hidden>
+                    Detener voz
+                </button>
+
+                <button id="debug-toggle" class="debug-toggle" type="button">
+                    Ver diagnóstico
+                </button>
+            </footer>
+        </section>
+
+        <!-- Panel de diagnóstico -->
+        <aside id="debug-panel" class="debug-panel" hidden>
+            <header>
+                <strong>Diagnóstico</strong>
+                <button id="debug-close" type="button">Cerrar</button>
+            </header>
+            <div class="debug-section">
+                <h4>Cámara</h4>
+                <pre id="debug-camera">—</pre>
+            </div>
+            <div class="debug-section">
+                <h4>Última captura</h4>
+                <pre id="debug-capture">—</pre>
+            </div>
+            <div class="debug-section">
+                <h4>Respuesta cruda del modelo</h4>
+                <pre id="debug-raw">—</pre>
+            </div>
+            <div class="debug-section">
+                <h4>Preguntas detectadas</h4>
+                <pre id="debug-questions">—</pre>
+            </div>
+        </aside>
+
+        <!-- Overlay de carga -->
+        <div id="loading" class="loading" hidden>
+            <div class="spinner" aria-hidden="true"></div>
+            <p id="loading-text">Analizando página…</p>
+        </div>
+
+        <!-- Overlay de error -->
+        <div id="error" class="error" hidden>
+            <p id="error-text"></p>
+            <button id="error-close" type="button">Cerrar</button>
+        </div>
+    </main>
+
+    <!--
+        IMPORTANTE: la cámara y la API Web Speech requieren un contexto seguro.
+        Sirve esta carpeta con HTTPS o desde localhost. Ejemplos rápidos:
+            python3 -m http.server 8000
+            npx serve .
+        Para móvil real, despliega en Vercel/Netlify/Cloudflare Pages (HTTPS automático).
+    -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>

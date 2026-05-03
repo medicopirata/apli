@@ -34,6 +34,7 @@ const $btBlock      = document.getElementById("bt-block");
 const $btRecheck    = document.getElementById("bt-block-recheck");
 const $btBypass     = document.getElementById("bt-block-bypass");
 const $btText       = document.getElementById("bt-block-text");
+const $verifyAudio  = document.getElementById("verify-audio");
 
 // === Servicios y estado ===
 const camera = new Camera($video, $canvas);
@@ -285,31 +286,25 @@ async function snapshotAudio() {
     console.info("Snapshot audio:", _audioRefSnapshot);
 }
 
+// Watchdog ligero: solo enumera audiooutputs (sin abrir el micro) cada
+// pocos segundos para detectar cambios. Abrir el mic cada vez forzaría
+// al Bluetooth a cambiar de perfil A2DP→SCO y cortaría la voz.
+// El probe del mic solo se hace UNA VEZ al confirmar (snapshot inicial)
+// y bajo demanda al pulsar "🎧 Verificar".
 async function audioStillOk() {
     if (!_audioRefSnapshot) return true;
 
-    // Comprobación principal: el mic por defecto sigue siendo el mismo.
-    const mic = await probeDefaultMic();
-    if (_audioRefSnapshot.micDeviceId &&
-        mic.deviceId &&
-        mic.deviceId !== _audioRefSnapshot.micDeviceId) {
-        console.warn("Mic deviceId cambió:", _audioRefSnapshot.micDeviceId, "→", mic.deviceId);
-        return false;
-    }
-    if (_audioRefSnapshot.micLabel &&
-        mic.label &&
-        mic.label !== _audioRefSnapshot.micLabel) {
-        console.warn("Mic label cambió:", _audioRefSnapshot.micLabel, "→", mic.label);
-        return false;
-    }
-
-    // Comprobación secundaria: la lista de outputs no se ha encogido.
     const outputs = await listAudioOutputs();
-    if (outputs.length < _audioRefSnapshot.outCount) {
-        console.warn("Outputs bajó:", outputs.length, "<", _audioRefSnapshot.outCount);
+    const currentIds = new Set(outputs.map(d => d.deviceId));
+    const missing = _audioRefSnapshot.outIds.filter(id => !currentIds.has(id));
+    if (missing.length > 0) {
+        console.warn("Outputs perdidos:", missing);
         return false;
     }
-
+    if (outputs.length < _audioRefSnapshot.outCount) {
+        console.warn("Conteo de outputs bajó:", outputs.length, "<", _audioRefSnapshot.outCount);
+        return false;
+    }
     return true;
 }
 
@@ -318,20 +313,43 @@ async function audioWatchdog() {
     if (!_audioRefSnapshot) return;
     const ok = await audioStillOk();
     if (!ok) {
-        const mic     = await probeDefaultMic();
         const outputs = await listAudioOutputs();
-        showBtBlock(outputs, mic, "disconnect");
+        showBtBlock(outputs, { label: "(no comprobado)" }, "disconnect");
         _audioRefSnapshot = null;
     }
 }
 
 function startBtPolling() {
     if (_btPollInterval) return;
-    _btPollInterval = setInterval(audioWatchdog, 2000);
+    _btPollInterval = setInterval(audioWatchdog, 5000);
 }
 
 if (navigator.mediaDevices?.addEventListener) {
     navigator.mediaDevices.addEventListener("devicechange", audioWatchdog);
+}
+
+// Verificación manual a demanda (botón 🎧 en la UI principal)
+async function verifyAudioNow() {
+    const mic     = await probeDefaultMic();
+    const outputs = await listAudioOutputs();
+
+    if (!_audioRefSnapshot) {
+        showBtBlock(outputs, mic, "initial");
+        return;
+    }
+
+    const idChanged    = _audioRefSnapshot.micDeviceId && mic.deviceId && mic.deviceId !== _audioRefSnapshot.micDeviceId;
+    const labelChanged = _audioRefSnapshot.micLabel    && mic.label    && mic.label    !== _audioRefSnapshot.micLabel;
+    const outsLost     = _audioRefSnapshot.outIds.some(id => !outputs.find(d => d.deviceId === id));
+
+    if (idChanged || labelChanged || outsLost) {
+        showBtBlock(outputs, mic, "disconnect");
+        _audioRefSnapshot = null;
+    } else {
+        // Todo bien — solo feedback visual breve
+        setStatus(`✓ Audio OK (${mic.label || "mic activo"})`);
+        setTimeout(() => { if (!_audioBlocked) setStatus("Buscando página…"); }, 2500);
+    }
 }
 
 async function startAfterBtOk() {
@@ -581,6 +599,8 @@ $debugToggle.addEventListener("click", () => {
     $debugPanel.hidden = false;
 });
 $debugClose.addEventListener("click", () => { $debugPanel.hidden = true; });
+
+$verifyAudio.addEventListener("click", verifyAudioNow);
 
 $btRecheck.addEventListener("click", async () => {
     // Confirma estado actual: snapshot + start

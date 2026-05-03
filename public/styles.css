@@ -333,6 +333,34 @@ html, body {
     align-self: center;
 }
 
+/* === Botón de verificación manual de audio === */
+.verify-audio-btn {
+    position: absolute;
+    top: 60px;
+    left: 12px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    border: 1.5px solid rgba(255, 255, 255, 0.4);
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+    z-index: 6;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    -webkit-tap-highlight-color: transparent;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.verify-audio-btn:active {
+    transform: scale(0.92);
+    background: rgba(0, 0, 0, 0.75);
+}
+
 /* === Vista previa de captura === */
 .preview {
     position: absolute;

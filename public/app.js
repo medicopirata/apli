@@ -192,50 +192,97 @@ function refreshCameraDebug() {
 }
 
 // === Detección de auriculares Bluetooth ===
-// Si no hay un dispositivo de salida de audio que parezca Bluetooth,
-// bloqueamos la app con un overlay para que las respuestas no salgan
-// por el altavoz del teléfono.
+// Estrategia: cada 2 segundos enumeramos audiooutputs y comprobamos si
+// hay alguno cuya etiqueta sugiera Bluetooth. En Android Chrome el evento
+// `devicechange` es poco fiable, así que el polling es la red de seguridad.
+// Adicionalmente forzamos permiso de micrófono al arrancar para que los
+// labels de los audiooutputs se rellenen (sin él muchos navegadores los dejan vacíos).
 
-const BT_LABEL_RE = /\b(bluetooth|bt[-_ ]|wireless|airpods|buds|headset|headphone|aud[ií]fono|auricular|beats|bose|sony|jbl|sennheiser|skullcandy|galaxy buds|pixel buds)\b/i;
+const BT_LABEL_RE = /\b(bluetooth|bt[\s\-_]|wireless|airpods|buds|headset|headphone|aud[ií]fono|auricular|beats|bose|sony|jbl|sennheiser|skullcandy|galaxy\s*buds|pixel\s*buds|earbud|earphone|hands\s*free|a2dp|sco)\b/i;
+const SPEAKER_RE  = /^\s*(default[\s-]*)?(speaker|altavoz|internal\s*speaker|phone\s*speaker|earpiece|receiver)/i;
 
 let _btBypass = false;
 let _btCheckPending = false;
+let _btLastOk = null;          // último estado conocido (para detectar transiciones)
+let _btPollInterval = null;
+let _micWarmupTried = false;
+
+// Activa permiso de micro 100ms y lo cierra; sirve para que el navegador
+// rellene los labels de audiooutputs en Android Chrome.
+async function warmUpAudioLabels() {
+    if (_micWarmupTried) return;
+    _micWarmupTried = true;
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(t => t.stop());
+    } catch (e) {
+        console.warn("Warmup de audio falló (sin permiso de micro):", e.message);
+    }
+}
 
 async function isBluetoothAudioPresent() {
     if (!navigator.mediaDevices?.enumerateDevices) {
-        // Sin API → no podemos comprobar; mejor permitir.
-        return { ok: true, reason: "API no disponible" };
+        return { ok: true, reason: "API no disponible", outputs: [] };
     }
     try {
         const devices = await navigator.mediaDevices.enumerateDevices();
         const outputs = devices.filter(d => d.kind === "audiooutput");
 
-        // Si los labels están vacíos (sin permiso aún) no podemos juzgar.
-        const haveLabels = outputs.some(d => d.label && d.label.length > 0);
-        if (!haveLabels) {
-            return { ok: true, reason: "Etiquetas no disponibles aún" };
+        // Si NINGÚN audiooutput está expuesto (Android Chrome a veces),
+        // intentamos warmup de mic para forzar enumeración.
+        if (outputs.length === 0 && !_micWarmupTried) {
+            await warmUpAudioLabels();
+            const devices2 = await navigator.mediaDevices.enumerateDevices();
+            const outputs2 = devices2.filter(d => d.kind === "audiooutput");
+            return analyzeOutputs(outputs2);
         }
-
-        const matches = outputs.filter(d => BT_LABEL_RE.test(d.label));
-        if (matches.length > 0) {
-            return { ok: true, label: matches[0].label };
-        }
-        return {
-            ok: false,
-            reason: "Ningún dispositivo Bluetooth detectado",
-            found: outputs.map(d => d.label).filter(Boolean)
-        };
+        return analyzeOutputs(outputs);
     } catch (err) {
         console.warn("enumerateDevices falló:", err);
-        return { ok: true, reason: "Error en enumeración" };
+        return { ok: true, reason: "Error en enumeración", outputs: [] };
     }
 }
 
-function showBtBlock(extra = "") {
-    $btText.textContent = "La app solo funciona con auriculares Bluetooth conectados, para que las respuestas no se oigan por el altavoz del teléfono."
-        + (extra ? `\n\nDispositivos detectados: ${extra}` : "");
+function analyzeOutputs(outputs) {
+    const labels = outputs.map(d => d.label).filter(Boolean);
+
+    // Sin etiquetas todavía → no podemos juzgar.
+    if (outputs.length > 0 && labels.length === 0) {
+        return { ok: true, reason: "Etiquetas vacías", outputs };
+    }
+
+    // Dispositivos no-altavoz: cualquier output cuya etiqueta no parezca
+    // del altavoz interno del teléfono (heurística más robusta que solo BT).
+    const nonSpeaker = outputs.filter(d => d.label && !SPEAKER_RE.test(d.label));
+    const btMatches  = outputs.filter(d => d.label && BT_LABEL_RE.test(d.label));
+
+    if (btMatches.length > 0) {
+        return { ok: true, label: btMatches[0].label, outputs };
+    }
+    if (nonSpeaker.length > 0) {
+        // Hay un dispositivo externo aunque no detectamos "bluetooth" en el nombre.
+        return { ok: true, label: nonSpeaker[0].label, outputs };
+    }
+    return {
+        ok: false,
+        reason: "Solo altavoz interno",
+        outputs,
+        found: labels
+    };
+}
+
+function renderBtOverlay(res) {
+    const list = (res.outputs || [])
+        .map(d => `• ${d.label || "(sin etiqueta)"} — ${d.kind}`)
+        .join("\n") || "(ninguno detectado)";
+    $btText.textContent =
+        "La app solo funciona con auriculares Bluetooth conectados.\n\n" +
+        "Dispositivos de salida actuales:\n" + list;
+}
+
+function showBtBlock(res) {
+    renderBtOverlay(res);
     $btBlock.hidden = false;
-    // Pausa todo lo activo
     _audioBlocked = true;
     speech.cancel();
     speechChain = Promise.resolve();
@@ -254,13 +301,29 @@ async function enforceBluetoothCheck({ initialStart = false } = {}) {
     _btCheckPending = true;
     try {
         const res = await isBluetoothAudioPresent();
-        if (res.ok) {
-            hideBtBlock();
-            if (initialStart) await startAfterBtOk();
-            return true;
+
+        // Transición OK → no OK : pausa
+        if (_btLastOk === true && !res.ok) {
+            console.warn("Audio externo desconectado:", res);
+            showBtBlock(res);
         }
-        showBtBlock(res.found?.join(", ") || "");
-        return false;
+        // Transición no OK → OK : reanuda
+        else if (_btLastOk === false && res.ok) {
+            console.info("Audio externo conectado:", res);
+            hideBtBlock();
+            await startAfterBtOk();
+        }
+        // Estado inicial
+        else if (_btLastOk === null) {
+            if (res.ok) {
+                hideBtBlock();
+                if (initialStart) await startAfterBtOk();
+            } else {
+                showBtBlock(res);
+            }
+        }
+        _btLastOk = res.ok;
+        return res.ok;
     } finally {
         _btCheckPending = false;
     }
@@ -275,10 +338,18 @@ async function startAfterBtOk() {
     setStatus("Buscando página…");
 }
 
-// Reacciona a cambios de dispositivos (BT conectado/desconectado, etc.)
+// Polling cada 2 s — necesario porque en Android Chrome el evento
+// devicechange no siempre dispara al desconectar Bluetooth.
+function startBtPolling() {
+    if (_btPollInterval) return;
+    _btPollInterval = setInterval(() => {
+        enforceBluetoothCheck();
+    }, 2000);
+}
+
 if (navigator.mediaDevices?.addEventListener) {
     navigator.mediaDevices.addEventListener("devicechange", () => {
-        enforceBluetoothCheck({ initialStart: true });
+        enforceBluetoothCheck();
     });
 }
 
@@ -315,13 +386,12 @@ async function init() {
         refreshCameraDebug();
         setInterval(refreshCameraDebug, 1000);
 
-        // Tras conceder cámara, podemos enumerar audiooutputs con etiquetas.
-        const ok = await enforceBluetoothCheck();
-        if (!ok) return;  // overlay mostrado, esperando BT
+        // Warmup de mic: rellena labels de audiooutput en Android Chrome.
+        await warmUpAudioLabels();
 
-        setStatus("Buscando página…");
-        startAutoDetect();
-        requestWakeLock();
+        // Comprobación inicial + polling continuo
+        await enforceBluetoothCheck({ initialStart: true });
+        startBtPolling();
     } catch (err) {
         console.error("Error iniciando cámara:", err);
         $debugCamera.textContent = `ERROR: ${err.message}\n\nPuedes usar "Subir imagen" como alternativa.`;
@@ -523,6 +593,7 @@ $debugToggle.addEventListener("click", () => {
 $debugClose.addEventListener("click", () => { $debugPanel.hidden = true; });
 
 $btRecheck.addEventListener("click", () => {
+    _btLastOk = null;  // forzamos re-evaluación inicial
     enforceBluetoothCheck({ initialStart: true });
 });
 $btBypass.addEventListener("click", () => {
